@@ -1,13 +1,13 @@
 # Cosmos × LeIsaac: Video-to-Action Data Generation Pipeline
 
-This tutorial extends **LeIsaac** by integrating **Cosmos-Predict2.5** and **GR00T-Dreams IDM** into a LeIsaac-native data generation loop. **LeIsaac** is used to collect teleoperated demonstrations (HDF5) and convert them into LeRobot datasets. **Cosmos-Predict 2.5** is post-trained on these videos to synthesize additional rollout videos at scale, and **IDM** is fine-tuned on the same dataset to infer robot actions from the generated videos. Together, this produces **a scalable pipeline for constructing synthetic, complete LeRobot datasets** , which can be replayed and evaluated directly in LeIsaac.
+This tutorial extends **LeIsaac** by integrating **Cosmos-Predict2.5** and **GR00T-Dreams IDM** into a LeIsaac-native data generation loop. **LeIsaac** is used to collect teleoperated demonstrations (HDF5) and convert them into LeRobot datasets. **Cosmos-Predict 2.5** is post-trained on these videos to synthesize additional rollout videos at scale, and **IDM** is fine-tuned on the same dataset to infer robot actions from the generated videos. Together, this produces **a scalable pipeline for constructing synthetic, complete LeRobot datasets** , which can be replayed and evaluated directly in **LeIsaac**.
 
 ---
 
 ## Overview
 
 1. Use **LeIsaac** to collect an **HDF5 dataset** and convert it into a **LeRobot dataset** 
-2. Post-training **Cosmos-Predict2.5**, then run inference to **generate synthetic videos** 
+2. Post-train **Cosmos-Predict2.5**, then run inference to **generate synthetic videos** 
 3. Fine-tune **IDM**, then run inference to **generate synthetic LeRobot trajectories(parquet)**  
 4. Use **LeIsaac** to **replay and evaluate** using the HDF5 dataset + inferred action trajectories 
    
@@ -46,7 +46,7 @@ Convert the recorded HDF5 dataset into **LeRobot format**.
 > Ensure that all output videos are encoded using **H.264 (h264)**.  
 > Avoid **AV1** encoding, as Cosmos and IDM may fail during decoding or processing.  
 
-You can directly modify the `scripts/convert/isaaclab2lerobot.py` to ensure correct video encoding:
+You can directly modify the `leisaac/scripts/convert/isaaclab2lerobot.py` to ensure correct video encoding:
 ```python
 #from
 "video.codec": "av1"
@@ -81,13 +81,13 @@ Set up the Cosmos-Predict2.5 environment by following the official installation 
 
 Dataset folder format should be:
 ```
-cosmos-predict2.5/datasets/benchmark_train<task_name>/
+cosmos-predict2.5/datasets/benchmark_train/<task_name>/
 ├── metas/
 │   ├── *.txt
 ├── videos/
 │   ├── *.mp4
 ```
-How to construct it from your LeRobot dataset:
+Construct it from your LeRobot dataset:
 
 1.Copy MP4 videos from your LeRobot dataset from `<path_to_lerobot_dataset>/videos/`  to `cosmos-predict2.5/datasets/benchmark_train/<task_name>/videos/`
 
@@ -99,10 +99,10 @@ How to construct it from your LeRobot dataset:
 
 ---
 
-### 2.3 Post-training Cosmos-Predict2.5
+### 2.3 Post-train Cosmos-Predict2.5
 
-Post-training Cosmos-Predict2.5 on the prepared dataset by following **[the official post-training instructions](https://github.com/nvidia-cosmos/cosmos-predict2.5/blob/main/docs/post-training_video2world_gr00t.md#21-post-training-cosmos-predict25-2b-model)**:
-This step produces a Cosmos checkpoint specialized for your robot embodiment and task distribution.
+Post-train Cosmos-Predict2.5 on the prepared dataset by following **[the official post-training instructions](https://github.com/nvidia-cosmos/cosmos-predict2.5/blob/main/docs/post-training_video2world_gr00t.md#21-post-training-cosmos-predict25-2b-model)**.  
+This step produces a Cosmos-Predict2.5 checkpoint specialized for your robot embodiment and task distribution.
 
 ---
 
@@ -110,21 +110,20 @@ This step produces a Cosmos checkpoint specialized for your robot embodiment and
 
 After post-training, the Cosmos-Predict2.5 model checkpoints are typically saved in **Distributed Checkpoint (DCP)** format.Before running inference, these checkpoints need to be converted into a **consolidated PyTorch format** that can be loaded by the inference scripts.
 
-**Follow the [official instructions ](https://github.com/nvidia-cosmos/cosmos-predict2.5/blob/main/docs/post-training_video2world_gr00t.md#31-converting-dcp-checkpoint-to-consolidated-pytorch-format) to convert DCP checkpoints**.
+**Follow the [converting-dcp-checkpoint-to-consolidated-pytorch-format](https://github.com/nvidia-cosmos/cosmos-predict2.5/blob/main/docs/post-training_video2world_gr00t.md#31-converting-dcp-checkpoint-to-consolidated-pytorch-format) to convert DCP checkpoints**.
 
-Once the checkpoint has been converted, run video generation inference following the [official instructions ](https://github.com/nvidia-cosmos/cosmos-predict2.5/blob/main/docs/post-training_video2world_gr00t.md#32-running-inference).  
+Once the checkpoint has been converted, run video generation inference following the [official running-inference instructions ](https://github.com/nvidia-cosmos/cosmos-predict2.5/blob/main/docs/post-training_video2world_gr00t.md#32-running-inference). 
 
 
 #### 🔬**Batch Inference (Used for fine-tuning IDM)**
 
 For large-scale video generation, batch inference is supported.  
-You can generate a batch inference configuration file (for example, `batch_inference_config.jsonl`) using:
-
+You can generate a batch inference configuration `jsonl` file using:
 ```bash
 python scripts/generate_batch_config.py --use-prompt
 ```
-
 ---
+
 ## 3.Action Inference with IDM
 
 ### What you get from this step
@@ -139,7 +138,7 @@ IDM is first fine-tuned on the original LeRobot dataset collected via **LeIsaac*
 
 ### 3.1 Install IDM Environment
 
-IDM requires the **Cosmos-Predict2** environment (not 2.5).  
+IDM requires the **Cosmos-Predict2** environment (**not 2.5**).  
 Follow the official prerequisites guide:**[Cosmos-Predict2 – Prerequisites](https://github.com/nvidia-cosmos/cosmos-predict2/blob/main/documentations/post-training_video2world_gr00t.md#prerequisites)**
 
 #### 💡Notes on Dependency Installation
@@ -155,14 +154,14 @@ Follow the official prerequisites guide:**[Cosmos-Predict2 – Prerequisites](ht
 
 ---
 
-### 3.2 Fine-tuning IDM 
+### 3.2 Fine-tune IDM 
 For IDM fine-tuning, please refer to **[training-custom-idm-model](https://github.com/NVIDIA/GR00T-Dreams?tab=readme-ov-file#optional-33-training-custom-idm-model)**
 
 #### 3.2.1 Preparation: Modality Metadata and DataConfig
 
 ##### Step 1: Add modality.json
 
-Create modality.json under `GR00T-Dreams/IDM_dump/global_metadata/{embodiment_name}/` and copy the same file to `<path_to_lerobot_dataset>/meta/`
+Create `modality.json` under `GR00T-Dreams/IDM_dump/global_metadata/{embodiment_name}/` and copy the same file to `<path_to_lerobot_dataset>/meta/`
 
 Example: SO101 modality.json
 ```json
@@ -194,7 +193,7 @@ Example: SO101 modality.json
 
 ##### Step 2: Add a New DataConfig (So101DataConfig)
 
-Add a new `So101DataConfig` class defining in `gr00t/experiment/data_config_idm.py`:
+Add a new `So101DataConfig` class defining in `GR00T-Dreams/gr00t/experiment/data_config_idm.py`:
 ```python
 class So101DataConfig(BaseDataConfig):
     video_keys = ["video.front"]
@@ -305,7 +304,7 @@ PYTHONPATH=. torchrun scripts/idm_training.py \
 ```
 
 After loading the dataset, `stats.json` will be automatically generated under `<path_to_lerobot_dataset>/meta/`.  
-Copy this file to `GR00T-Dreams/IDM_dump/global_metadata/{embodiment_name}/`.
+**Copy this file to `GR00T-Dreams/IDM_dump/global_metadata/{embodiment_name}/`.**
 
 ---
 
@@ -315,7 +314,7 @@ After IDM post-training, use the trained model to infer actions from Cosmos-gene
 
 #### Step 1: Prepare Inference Configuration
 
-Select a checkpoint directory (e.g. checkpoint-10000/) and create checkpoint-10000/experiment_cfg/conf.yaml:
+Select a checkpoint directory (e.g. checkpoint-10000/) and create `checkpoint-10000/experiment_cfg/conf.yaml`:
 ```yaml
 # Configuration for so101 IDM (LiftCube dataset)
 # SO101 robot with 6 DOF: shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper
@@ -495,7 +494,7 @@ Switch to the **LeIsaac** environment and project directory.
 
 Copy the replay helper script `cosmos_check_valid.py` into the LeIsaac scripts folder:`leisaac/scripts/`.
 
-Run the replay script with the target task enabled:
+Run the replay script with the **target task** enabled:
 
 ```bash
 python scripts/cosmos_check_valid.py \
