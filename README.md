@@ -118,6 +118,7 @@ Once the checkpoint has been converted, run video generation inference following
 #### 🔬**Batch Inference (Used for fine-tuning IDM)**
 
 For large-scale video generation, batch inference is supported.  
+Copy the batch inference helper script `generate_batch_config.py` into the folder:`cosmos-predict2.5/scripts/`.  
 You can generate a batch inference configuration `jsonl` file using:
 ```bash
 python scripts/generate_batch_config.py --use-prompt
