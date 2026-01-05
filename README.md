@@ -89,13 +89,13 @@ cosmos-predict2.5/datasets/benchmark_train<task_name>/
 ```
 How to construct it from your LeRobot dataset:
 
-1.Copy MP4 videos from your LeRobot dataset from `your_lerobot_dataset/videos/`  to `cosmos-predict2.5/datasets/benchmark_train/<task_name>/videos/`
+1.Copy MP4 videos from your LeRobot dataset from `<path_to_lerobot_dataset>/videos/`  to `cosmos-predict2.5/datasets/benchmark_train/<task_name>/videos/`
 
 2.Rename the copied videos as a clean numeric sequence:`1.mp4`, `2.mp4`, `3.mp4`, ...
 
 3.Create the same number of prompt files under `cosmos-predict2.5/datasets/benchmark_train/<task_name>/metas/`
 
-4.Fill each prompt file using the task text in `your_lerobot_dataset/meta/tasks.jsonl`.For example, if one line in tasks.jsonl is `{"task_index": 0, "task": "Lift the red cube up."}`,then 1.txt should contain `Lift_the_red_cube_up`.In many single-task cases, you will write the same prompt into all *.txt files, but the format supports per-video prompts if needed.
+4.Fill each prompt file using the task text in `<path_to_lerobot_dataset>/meta/tasks.jsonl`.For example, if one line in tasks.jsonl is `{"task_index": 0, "task": "Lift the red cube up."}`,then 1.txt should contain `Lift_the_red_cube_up`.In many single-task cases, you will write the same prompt into all *.txt files, but the format supports per-video prompts if needed.
 
 ---
 
@@ -127,7 +127,379 @@ python scripts/generate_batch_config.py --use-prompt
 ---
 ## 3.Action Inference with IDM
 
+### What you get from this step
+
+- An **IDM checkpoint** fine-tuned on your LeRobot dataset and robot embodiment  
+- A set of **LeRobot-format trajectories** (e.g. parquet files) inferred from Cosmos-generated videos  
+
+In this pipeline, **IDM (Inverse Dynamics Model)** from **GR00T-Dreams** is used to convert **Cosmos-generated rollout videos** into executable robot actions.  
+IDM is first fine-tuned on the original LeRobot dataset collected via **LeIsaac**, and then applied to infer actions from synthetic videos, producing a new, fully compatible **LeRobot dataset**.
 
 ---
+
+### 3.1 Install IDM Environment
+
+IDM requires the **Cosmos-Predict2** environment (not 2.5).  
+Follow the official prerequisites guide:**[Cosmos-Predict2 – Prerequisites](https://github.com/nvidia-cosmos/cosmos-predict2/blob/main/documentations/post-training_video2world_gr00t.md#prerequisites)**
+
+#### 💡Notes on Dependency Installation
+- When installing dependencies such as `openai` and `tyro`, use:
+  ```bash
+  uv pip install openai tyro numpydantic albumentations tianshou
+  ```
+- For `pytorch3d`, install with `no build isolation`:
+  ```bash
+  uv pip install --no-build-isolation git+https://github.com/facebookresearch/pytorch3d.git
+  ```
+- If you encounter issues related to `APEX`, it can be safely removed from the uv environment.APEX is not required for IDM training or inference.:
+
+---
+
+### 3.2 Fine-tuning IDM 
+For IDM fine-tuning, please refer to **[training-custom-idm-model](https://github.com/NVIDIA/GR00T-Dreams?tab=readme-ov-file#optional-33-training-custom-idm-model)**
+
+#### 3.2.1 Preparation: Modality Metadata and DataConfig
+
+##### Step 1: Add modality.json
+
+Create modality.json under `GR00T-Dreams/IDM_dump/global_metadata/{embodiment_name}/` and copy the same file to `<path_to_lerobot_dataset>/meta/`
+
+Example: SO101 modality.json
+```json
+{
+  "state": {
+    "shoulder_pan": { "start": 0, "end": 1 },
+    "shoulder_lift": { "start": 1, "end": 2 },
+    "elbow_flex": { "start": 2, "end": 3 },
+    "wrist_flex": { "start": 3, "end": 4 },
+    "wrist_roll": { "start": 4, "end": 5 },
+    "gripper": { "start": 5, "end": 6 }
+  },
+  "action": {
+    "shoulder_pan": { "start": 0, "end": 1, "absolute": false },
+    "shoulder_lift": { "start": 1, "end": 2, "absolute": false },
+    "elbow_flex": { "start": 2, "end": 3, "absolute": false },
+    "wrist_flex": { "start": 3, "end": 4, "absolute": false },
+    "wrist_roll": { "start": 4, "end": 5, "absolute": false },
+    "gripper": { "start": 5, "end": 6, "absolute": false }
+  },
+  "video": {
+    "front": { "original_key": "observation.images.front" }
+  },
+  "annotation": {
+    "human.task_description": { "original_key": "task_index" }
+  }
+}
+```
+
+##### Step 2: Add a New DataConfig (So101DataConfig)
+
+Add a new `So101DataConfig` class defining in `gr00t/experiment/data_config_idm.py`:
+```python
+class So101DataConfig(BaseDataConfig):
+    video_keys = ["video.front"]
+    state_keys = ["state.shoulder_pan", "state.shoulder_lift", "state.elbow_flex", "state.wrist_flex", "state.wrist_roll", "state.gripper"]
+    action_keys = ["action.shoulder_pan", "action.shoulder_lift", "action.elbow_flex", "action.wrist_flex", "action.wrist_roll", "action.gripper"]
+    language_keys = ["annotation.human.task_description"]
+    observation_indices = [0, 16]
+    action_indices = list(range(16))
+
+    def modality_config(self) -> dict[str, ModalityConfig]:
+        video_modality = ModalityConfig(
+            delta_indices=self.observation_indices,
+            modality_keys=self.video_keys,
+        )
+
+        state_modality = ModalityConfig(
+            delta_indices=self.observation_indices,
+            modality_keys=self.state_keys,
+        )
+
+        action_modality = ModalityConfig(
+            delta_indices=self.action_indices,
+            modality_keys=self.action_keys,
+        )
+
+        language_modality = ModalityConfig(
+            delta_indices=self.observation_indices,
+            modality_keys=self.language_keys,
+        )
+
+        modality_configs = {
+            "video": video_modality,
+            "state": state_modality,
+            "action": action_modality,
+            "language": language_modality,
+        }
+
+        return modality_configs
+
+    def transform(self) -> ModalityTransform:
+        transforms = [
+            # video transforms
+            VideoToTensor(apply_to=self.video_keys),
+            VideoCrop(apply_to=self.video_keys, scale=0.95),
+            VideoResize(apply_to=self.video_keys, height=224, width=224, interpolation="linear"),
+            VideoColorJitter(
+                apply_to=self.video_keys,
+                brightness=0.3,
+                contrast=0.4,
+                saturation=0.5,
+                hue=0.08,
+            ),
+            VideoToNumpy(apply_to=self.video_keys),
+            # state transforms
+            StateActionToTensor(apply_to=self.state_keys),
+            StateActionTransform(
+                apply_to=self.state_keys,
+                normalization_modes={key: "min_max" for key in self.state_keys},
+            ),
+            # action transforms
+            StateActionToTensor(apply_to=self.action_keys),
+            StateActionTransform(
+                apply_to=self.action_keys,
+                normalization_modes={key: "min_max" for key in self.action_keys},
+            ),
+            # concat transforms
+            ConcatTransform(
+                video_concat_order=self.video_keys,
+                state_concat_order=self.state_keys,
+                action_concat_order=self.action_keys,
+            ),
+            # model-specific transform
+            GR00TIDMTransform(
+                state_horizon=len(self.observation_indices),
+                action_horizon=len(self.action_indices),
+                max_state_dim=64,
+                max_action_dim=32,
+            ),
+        ]
+        return ComposedModalityTransform(transforms=transforms)
+```
+
+Register the new config in `DATA_CONFIG_MAP`:
+```python
+DATA_CONFIG_MAP = {
+    "gr1_arms_waist": Gr1ArmsWaistDataConfig(),
+    "gr1_arms_only": Gr1ArmsOnlyDataConfig(),
+    "gr1_full_upper_body": Gr1FullUpperBodyDataConfig(),
+    "bimanual_panda_gripper": BimanualPandaGripperDataConfig(),
+    "bimanual_panda_hand": BimanualPandaHandDataConfig(),
+    "single_panda_gripper": SinglePandaGripperDataConfig(),
+    "so100": So100DataConfig(),
+    "franka": FrankaDataConfig(),
+    "so101": So101DataConfig(),#add
+}
+```
+---
+
+#### 3.2.2 Run IDM Post-training
+
+Post-train **IDM (GR00T-Dreams)** using the LeRobot dataset and the newly registered data configuration.
+
+```bash
+PYTHONPATH=. torchrun scripts/idm_training.py \
+  --dataset-path <path_to_lerobot_dataset> \
+  --data-config <key_from_DATA_CONFIG_MAP> \
+  --output_dir <path_to_output_dir>
+```
+
+After loading the dataset, `stats.json` will be automatically generated under `<path_to_lerobot_dataset>/meta/`.  
+Copy this file to `GR00T-Dreams/IDM_dump/global_metadata/{embodiment_name}/`.
+
+---
+
+### 3.3 Extract Robot Actions to LeRobot Format
+
+After IDM post-training, use the trained model to infer actions from Cosmos-generated videos.
+
+#### Step 1: Prepare Inference Configuration
+
+Select a checkpoint directory (e.g. checkpoint-10000/) and create checkpoint-10000/experiment_cfg/conf.yaml:
+```yaml
+# Configuration for so101 IDM (LiftCube dataset)
+# SO101 robot with 6 DOF: shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper
+
+modality_configs:
+  so101:
+    video:
+      _target_: gr00t.data.dataset.ModalityConfig
+      delta_indices:
+      - 0
+      - 16
+      modality_keys:
+      - video.front
+    state:
+      _target_: gr00t.data.dataset.ModalityConfig
+      delta_indices:
+      - 0
+      - 16
+      modality_keys:
+      - state.shoulder_pan
+      - state.shoulder_lift
+      - state.elbow_flex
+      - state.wrist_flex
+      - state.wrist_roll
+      - state.gripper
+    action:
+      _target_: gr00t.data.dataset.ModalityConfig
+      delta_indices:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      - 9
+      - 10
+      - 11
+      - 12
+      - 13
+      - 14
+      - 15
+      modality_keys:
+      - action.shoulder_pan
+      - action.shoulder_lift
+      - action.elbow_flex
+      - action.wrist_flex
+      - action.wrist_roll
+      - action.gripper
+    language:
+      _target_: gr00t.data.dataset.ModalityConfig
+      delta_indices:
+      - 0
+      modality_keys:
+      - annotation.human.task_description
+
+all_transforms:
+  so101:
+    _target_: gr00t.data.transform.base.ComposedModalityTransform
+    transforms:
+    - _target_: gr00t.data.transform.video.VideoToTensor
+      apply_to:
+      - video.front
+    - _target_: gr00t.data.transform.video.VideoCrop
+      apply_to:
+      - video.front
+      scale: 0.95
+    - _target_: gr00t.data.transform.video.VideoResize
+      apply_to:
+      - video.front
+      height: 224
+      width: 224
+      interpolation: linear
+    - _target_: gr00t.data.transform.video.VideoColorJitter
+      apply_to:
+      - video.front
+      brightness: 0.3
+      contrast: 0.4
+      saturation: 0.5
+      hue: 0.08
+    - _target_: gr00t.data.transform.video.VideoToNumpy
+      apply_to:
+      - video.front
+    - _target_: gr00t.data.transform.state_action.StateActionToTensor
+      apply_to:
+      - state.shoulder_pan
+      - state.shoulder_lift
+      - state.elbow_flex
+      - state.wrist_flex
+      - state.wrist_roll
+      - state.gripper
+    - _target_: gr00t.data.transform.state_action.StateActionTransform
+      apply_to:
+      - state.shoulder_pan
+      - state.shoulder_lift
+      - state.elbow_flex
+      - state.wrist_flex
+      - state.wrist_roll
+      - state.gripper
+      normalization_modes:
+        state.shoulder_pan: min_max
+        state.shoulder_lift: min_max
+        state.elbow_flex: min_max
+        state.wrist_flex: min_max
+        state.wrist_roll: min_max
+        state.gripper: min_max
+    - _target_: gr00t.data.transform.state_action.StateActionToTensor
+      apply_to:
+      - action.shoulder_pan
+      - action.shoulder_lift
+      - action.elbow_flex
+      - action.wrist_flex
+      - action.wrist_roll
+      - action.gripper
+    - _target_: gr00t.data.transform.state_action.StateActionTransform
+      apply_to:
+      - action.shoulder_pan
+      - action.shoulder_lift
+      - action.elbow_flex
+      - action.wrist_flex
+      - action.wrist_roll
+      - action.gripper
+      normalization_modes:
+        action.shoulder_pan: min_max
+        action.shoulder_lift: min_max
+        action.elbow_flex: min_max
+        action.wrist_flex: min_max
+        action.wrist_roll: min_max
+        action.gripper: min_max
+    - _target_: gr00t.data.transform.concat.ConcatTransform
+      video_concat_order:
+      - video.front
+      state_concat_order:
+      - state.shoulder_pan
+      - state.shoulder_lift
+      - state.elbow_flex
+      - state.wrist_flex
+      - state.wrist_roll
+      - state.gripper
+      action_concat_order:
+      - action.shoulder_pan
+      - action.shoulder_lift
+      - action.elbow_flex
+      - action.wrist_flex
+      - action.wrist_roll
+      - action.gripper
+    - _target_: gr00t.model.transforms_idm.GR00TIDMTransform
+      state_horizon: 2
+      action_horizon: 16
+      max_state_dim: 64
+      max_action_dim: 32
+
+metadata_versions:
+  so101: v2.1
+```
+
+Use a configuration matching the SO101 modality definition and transforms (as shown above).
+
+#### Step 2: Run IDM Inference
+
+Copy the preprocessing scripts folder `preprocess_leisaac` to `GR00T-Dreams/dump/scripts/` and `so101.sh` to `GR00T-Dreams/IDM_dump/scripts/preprocess/`
+
+Run the inference script:
+```bash
+PYTHONPATH=. bash IDM_dump/scripts/preprocess/so101.sh
+```
+
+This step produces the complete LeRobot-format outputs based on the Cosmos-generated videos.
+
+---
+
 ## 4.Replay and Evaluation in LeIsaac
 
+Switch to the **LeIsaac** environment and project directory. 
+
+Copy the replay helper script `cosmos_check_valid.py` into the LeIsaac scripts folder:`leisaac/scripts/`.
+
+Run the replay script with the target task enabled:
+
+```bash
+python scripts/cosmos_check_valid.py \
+  --task LeIsaac-SO101-LiftCube-v0 \
+  --enable_cameras
+```
+In this step, the **original HDF5 dataset** and the **IDM-generated LeRobot trajectories (parquet)** are replayed in **Isaac Sim** using **LeIsaac**.This replay process is used to validate the quality and physical plausibility of the inferred action trajectories.
