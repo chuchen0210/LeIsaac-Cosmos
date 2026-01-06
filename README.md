@@ -493,12 +493,12 @@ This step produces the complete LeRobot-format outputs based on the Cosmos-gener
 
 Switch to the **LeIsaac** environment and project directory. 
 
-Copy the replay helper script `cosmos_check_valid.py` into the LeIsaac scripts folder:`leisaac/scripts/`.
+Copy the replay helper script `replay.py` into the LeIsaac scripts folder:`leisaac/scripts/`.
 
 Run the replay script with the **target task** enabled:
 
 ```bash
-python scripts/cosmos_check_valid.py \
+python scripts/replay.py \
   --task LeIsaac-SO101-LiftCube-v0 \
   --enable_cameras
 ```
