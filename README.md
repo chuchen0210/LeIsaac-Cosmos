@@ -503,3 +503,7 @@ python scripts/cosmos_check_valid.py \
   --enable_cameras
 ```
 In this step, the **original HDF5 dataset** and the **IDM-generated LeRobot trajectories (parquet)** are replayed in **Isaac Sim** using **LeIsaac**.This replay process is used to validate the quality and physical plausibility of the inferred action trajectories.
+
+
+https://github.com/user-attachments/assets/119ac294-a1cd-4721-b0bf-71725dddab0f
+
