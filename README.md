@@ -2,9 +2,13 @@
 
 This tutorial extends **LeIsaac** by integrating **Cosmos-Predict2.5** and **GR00T-Dreams IDM** into a LeIsaac-native data generation loop. **LeIsaac** is used to collect teleoperated demonstrations (HDF5) and convert them into LeRobot datasets. **Cosmos-Predict 2.5** is post-trained on these videos to synthesize additional rollout videos at scale, and **IDM** is fine-tuned on the same dataset to infer robot actions from the generated videos. Together, this produces **a scalable pipeline for constructing synthetic, complete LeRobot datasets** , which can be replayed and evaluated directly in **LeIsaac**.
 
-
-https://github.com/user-attachments/assets/e89c5400-ab23-49a9-9487-6204808c3ac4
-
+## 🎥From a Single Demonstration to Large-Scale Synthetic Rollouts via Cosmos
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/e89c5400-ab23-49a9-9487-6204808c3ac4"
+         controls
+         width="100%">
+  </video>
+</div>
 
 ---
 
