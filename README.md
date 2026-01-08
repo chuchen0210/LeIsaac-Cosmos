@@ -297,6 +297,7 @@ Create `modality.json` under `GR00T-Dreams/IDM_dump/global_metadata/{embodiment_
 
 <details>
 <summary><strong>Example: SO101 modality.json</strong></summary>
+
 ```json
 {
   "state": {
